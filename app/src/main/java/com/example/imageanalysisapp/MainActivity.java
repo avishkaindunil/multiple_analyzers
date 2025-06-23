@@ -185,8 +185,8 @@ public class MainActivity extends AppCompatActivity {
                 img.getHeight()==resA.getHeight()
                 ? "AnalyzerA" : "AnalyzerB";
         Log.d(tag,
-                "req=" + (tag.equals("AnalyzerA")?resA:resB) +
-                        ", act=" + img.getWidth()+"×"+img.getHeight() +
+                "requested=" + (tag.equals("AnalyzerA")?resA:resB) +
+                        ", actual=" + img.getWidth()+"×"+img.getHeight() +
                         ", ts=" + ts);
         img.close();
     }
