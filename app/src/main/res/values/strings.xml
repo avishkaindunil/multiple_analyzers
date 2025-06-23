@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">ImageAnalysisApp</string>
+<!--    <string-array name="res_options">-->
+<!--        <item>240×320</item>-->
+<!--        <item>480×640</item>-->
+<!--        <item>720×1280</item>-->
+<!--        <item>1080×1920</item>-->
+<!--    </string-array>-->
+</resources>
