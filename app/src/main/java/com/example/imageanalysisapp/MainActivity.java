@@ -21,6 +21,8 @@ import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
+import androidx.camera.core.resolutionselector.ResolutionSelector;
+import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
@@ -34,12 +36,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
-    private static final String TAG           = "MainActivity";
-    private static final int    REQUEST_CAMERA = 42;
+    private static final String TAG = "MainActivity";
+    private static final int    PERM_REQ = 42;
 
     private PreviewView previewView;
     private Spinner     spinnerA, spinnerB;
-    private Button      applyButton;
+    private Button      applyBtn;
 
     private Size resA, resB;
     private ExecutorService execA, execB;
@@ -50,113 +52,120 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        previewView  = findViewById(R.id.previewView);
-        spinnerA     = findViewById(R.id.spinnerA);
-        spinnerB     = findViewById(R.id.spinnerB);
-        applyButton  = findViewById(R.id.applyButton);
+        previewView = findViewById(R.id.previewView);
+        spinnerA    = findViewById(R.id.spinnerA);
+        spinnerB    = findViewById(R.id.spinnerB);
+        applyBtn    = findViewById(R.id.applyButton);
 
         execA = Executors.newSingleThreadExecutor();
         execB = Executors.newSingleThreadExecutor();
 
+        // 1) Camera permission → populate spinners
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 == PackageManager.PERMISSION_GRANTED) {
-            populateResolutions();
+            loadSupportedSizes();
         } else {
             ActivityCompat.requestPermissions(
-                    this,
-                    new String[]{Manifest.permission.CAMERA},
-                    REQUEST_CAMERA
-            );
+                    this, new String[]{Manifest.permission.CAMERA}, PERM_REQ);
         }
 
-        applyButton.setOnClickListener(v -> {
-            resA = parse((String) spinnerA.getSelectedItem());
-            resB = parse((String) spinnerB.getSelectedItem());
-            startCamera();
+        // 2) On Apply → read selections & bind
+        applyBtn.setOnClickListener(v -> {
+            resA = toSize((String)spinnerA.getSelectedItem());
+            resB = toSize((String)spinnerB.getSelectedItem());
+            Log.d(TAG, "Chosen: A=" + resA + ", B=" + resB);
+            bindCameraX();
         });
     }
 
     @Override
-    public void onRequestPermissionsResult(int code,
-                                           @NonNull String[] perms, @NonNull int[] grants) {
-        super.onRequestPermissionsResult(code, perms, grants);
-        if (code == REQUEST_CAMERA
-                && grants.length>0
-                && grants[0]==PackageManager.PERMISSION_GRANTED) {
-            populateResolutions();
+    public void onRequestPermissionsResult(int req, @NonNull String[] perms,
+                                           @NonNull int[] grants) {
+        super.onRequestPermissionsResult(req, perms, grants);
+        if (req==PERM_REQ && grants[0]==PackageManager.PERMISSION_GRANTED) {
+            loadSupportedSizes();
         }
     }
 
-    private void populateResolutions() {
+    private void loadSupportedSizes() {
         try {
             CameraManager cm = (CameraManager)getSystemService(CAMERA_SERVICE);
             String camId = cm.getCameraIdList()[0];
-            CameraCharacteristics chars =
-                    cm.getCameraCharacteristics(camId);
-            StreamConfigurationMap map =
-                    chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            Size[] sizes = map.getOutputSizes(ImageReader.class);
+            CameraCharacteristics chars = cm.getCameraCharacteristics(camId);
+            StreamConfigurationMap map = chars.get(
+                    CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            if (map == null) return;
 
+            Size[] sizes = map.getOutputSizes(ImageReader.class);
             List<String> labels = new ArrayList<>();
-            for (Size s : sizes) {
-                labels.add(s.getWidth()+"×"+s.getHeight());
-            }
+            for (Size s: sizes) labels.add(s.getWidth()+"×"+s.getHeight());
 
             ArrayAdapter<String> ad = new ArrayAdapter<>(
                     this, android.R.layout.simple_spinner_item, labels);
-            ad.setDropDownViewResource(
-                    android.R.layout.simple_spinner_dropdown_item);
+            ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             spinnerA.setAdapter(ad);
             spinnerB.setAdapter(ad);
 
             if (labels.size()>1) spinnerB.setSelection(1);
+
         } catch (CameraAccessException e) {
-            Log.e(TAG, "populateResolutions failed", e);
+            Log.e(TAG, "Failed to load sizes", e);
         }
     }
 
-    private Size parse(String txt) {
+    private Size toSize(String txt) {
         String[] p = txt.split("×");
         return new Size(Integer.parseInt(p[0].trim()),
                 Integer.parseInt(p[1].trim()));
     }
 
-    private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> future =
+    private void bindCameraX() {
+        ListenableFuture<ProcessCameraProvider> f =
                 ProcessCameraProvider.getInstance(this);
-        future.addListener(() -> {
+        f.addListener(() -> {
             try {
-                cameraProvider = future.get();
+                cameraProvider = f.get();
                 cameraProvider.unbindAll();
 
-                Display display = previewView.getDisplay();
-                int rotation = display.getRotation();
+                int rotation = previewView.getDisplay().getRotation();
 
-                // Preview
+                /** Preview use case */
                 Preview preview = new Preview.Builder()
                         .setTargetRotation(rotation)
                         .build();
-                preview.setSurfaceProvider(previewView.getSurfaceProvider());
+                preview.setSurfaceProvider(
+                        previewView.getSurfaceProvider()
+                );
 
                 /** imageAnalysisUseCaseA */
-                ImageAnalysis imageAnalysisUseCaseA = new ImageAnalysis.Builder()
-                        .setTargetResolution(resA)
-                        .setTargetRotation(rotation)
-                        .setBackpressureStrategy(
-                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                ResolutionSelector selA = new ResolutionSelector.Builder()
+                        .setResolutionStrategy(
+                                new ResolutionStrategy(
+                                        resA,
+                                        ResolutionStrategy.FALLBACK_RULE_NONE))
                         .build();
-                imageAnalysisUseCaseA.setAnalyzer(execA, this::logFrameA);
+                ImageAnalysis imageAnalysisUseCaseA = new ImageAnalysis.Builder()
+                        .setResolutionSelector(selA)
+                        .setTargetRotation(rotation)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build();
+                imageAnalysisUseCaseA.setAnalyzer(execA, this::logFrame);
 
                 /** imageAnalysisUseCaseB */
-                ImageAnalysis imageAnalysisUseCaseB = new ImageAnalysis.Builder()
-                        .setTargetResolution(resB)
-                        .setTargetRotation(rotation)
-                        .setBackpressureStrategy(
-                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                ResolutionSelector selB = new ResolutionSelector.Builder()
+                        .setResolutionStrategy(
+                                new ResolutionStrategy(
+                                        resB,
+                                        ResolutionStrategy.FALLBACK_RULE_NONE))
                         .build();
-                imageAnalysisUseCaseB.setAnalyzer(execB, this::logFrameB);
+                ImageAnalysis imageAnalysisUseCaseB = new ImageAnalysis.Builder()
+                        .setResolutionSelector(selB)
+                        .setTargetRotation(rotation)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build();
+                imageAnalysisUseCaseB.setAnalyzer(execB, this::logFrame);
 
-                // Bind all use-cases (may negotiate separate sessions)
+                /** Bind all use cases */
                 cameraProvider.bindToLifecycle(
                         this,
                         CameraSelector.DEFAULT_BACK_CAMERA,
@@ -164,25 +173,20 @@ public class MainActivity extends AppCompatActivity {
                         imageAnalysisUseCaseA,
                         imageAnalysisUseCaseB
                 );
-
             } catch (Exception e) {
-                Log.e(TAG, "CameraProvider failure", e);
+                Log.e(TAG, "bindCameraX failed", e);
             }
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private void logFrameA(ImageProxy img) {
+    private void logFrame(ImageProxy img) {
         long ts = img.getImageInfo().getTimestamp();
-        Log.d("AnalyzerA",
-                "req=" + resA + ", act=" + img.getWidth()+"×"+img.getHeight() +
-                        ", ts=" + ts);
-        img.close();
-    }
-
-    private void logFrameB(ImageProxy img) {
-        long ts = img.getImageInfo().getTimestamp();
-        Log.d("AnalyzerB",
-                "req=" + resB + ", act=" + img.getWidth()+"×"+img.getHeight() +
+        String tag = img.getWidth()==resA.getWidth() &&
+                img.getHeight()==resA.getHeight()
+                ? "AnalyzerA" : "AnalyzerB";
+        Log.d(tag,
+                "req=" + (tag.equals("AnalyzerA")?resA:resB) +
+                        ", act=" + img.getWidth()+"×"+img.getHeight() +
                         ", ts=" + ts);
         img.close();
     }
