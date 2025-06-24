@@ -196,7 +196,7 @@ public class MainActivity extends AppCompatActivity {
                         .setTargetRotation(rotation)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
-                imageAnalysisUseCaseA.setAnalyzer(execB, img -> logFrame("AnalyzerB", resB, img));
+                imageAnalysisUseCaseB.setAnalyzer(execB, img -> logFrame("AnalyzerB", resB, img));
 
                 /** Bind to all useCases */
                 cameraProvider.bindToLifecycle(
