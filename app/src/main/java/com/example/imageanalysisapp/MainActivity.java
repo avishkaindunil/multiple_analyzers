@@ -19,12 +19,14 @@ import android.widget.Spinner;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.core.AspectRatio;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.core.Preview.SurfaceProvider;
 import androidx.camera.core.ResolutionInfo;
+import androidx.camera.core.resolutionselector.AspectRatioStrategy;
 import androidx.camera.core.resolutionselector.ResolutionSelector;
 import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
@@ -140,12 +142,14 @@ public class MainActivity extends AppCompatActivity {
                 Display display = previewView.getDisplay();
                 int rotation = display.getRotation();
 
-                /** Preview with FALLBACK */
+                /** Force aspect ratio to the Preview */
+                AspectRatioStrategy ar16_9 = new AspectRatioStrategy(
+                        AspectRatio.RATIO_16_9,
+                        AspectRatioStrategy.FALLBACK_RULE_NONE
+                );
+
                 ResolutionSelector previewSel = new ResolutionSelector.Builder()
-                        .setResolutionStrategy(
-                                new ResolutionStrategy(
-                                        new Size(1920, 1080),
-                                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                        .setAspectRatioStrategy(ar16_9)
                         .build();
 
                 Preview preview = new Preview.Builder()
@@ -153,12 +157,13 @@ public class MainActivity extends AppCompatActivity {
                         .setTargetRotation(rotation)
                         .build();
 
+                /** Hook up viewfinder */
                 SurfaceProvider orig = previewView.getSurfaceProvider();
                 preview.setSurfaceProvider(
                         ContextCompat.getMainExecutor(this),
                         request -> {
                             Size d = request.getResolution();
-                            Log.d(TAG, "SurfaceRequest preview: "
+                            Log.d(TAG, "SurfaceRequest preview (16:9): "
                                     + d.getWidth() + "×" + d.getHeight());
                             orig.onSurfaceRequested(request);
                         }
@@ -169,7 +174,7 @@ public class MainActivity extends AppCompatActivity {
                         .setResolutionStrategy(
                                 new ResolutionStrategy(
                                         resA,
-                                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                                        ResolutionStrategy.FALLBACK_RULE_NONE))
                         .build();
                 ImageAnalysis imageAnalysisUseCaseA = new ImageAnalysis.Builder()
                         .setResolutionSelector(selA)
@@ -178,21 +183,22 @@ public class MainActivity extends AppCompatActivity {
                         .build();
                 imageAnalysisUseCaseA.setAnalyzer(execA, img -> logFrame("AnalyzerA", resA, img));
 
-                /** ImageAnalysisUseCaseB */
+
+                /** ImageAnalysisUseCaseA */
                 ResolutionSelector selB = new ResolutionSelector.Builder()
                         .setResolutionStrategy(
                                 new ResolutionStrategy(
                                         resB,
-                                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                                        ResolutionStrategy.FALLBACK_RULE_NONE))
                         .build();
                 ImageAnalysis imageAnalysisUseCaseB = new ImageAnalysis.Builder()
                         .setResolutionSelector(selB)
                         .setTargetRotation(rotation)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
-                imageAnalysisUseCaseB.setAnalyzer(execB, img -> logFrame("AnalyzerB", resB, img));
+                imageAnalysisUseCaseA.setAnalyzer(execB, img -> logFrame("AnalyzerB", resB, img));
 
-                /** Bind all useCases */
+                /** Bind to all useCases */
                 cameraProvider.bindToLifecycle(
                         this,
                         CameraSelector.DEFAULT_BACK_CAMERA,
@@ -201,15 +207,15 @@ public class MainActivity extends AppCompatActivity {
                         imageAnalysisUseCaseB
                 );
 
-                /** Final preview resolution and aspect ratio */
+                /** Log final preview resolution & aspect */
                 ResolutionInfo info = preview.getResolutionInfo();
                 if (info != null) {
                     Size actual = info.getResolution();
-                    int w = actual.getWidth();
-                    int h = actual.getHeight();
-                    String ratio = getAspectRatio(w, h);
+                    String ratio = getAspectRatio(
+                            actual.getWidth(), actual.getHeight());
                     Log.d(TAG, "getResolutionInfo(): "
-                            + w + "×" + h + "  (Aspect Ratio: " + ratio + ")");
+                            + actual.getWidth() + "×" + actual.getHeight()
+                            + "  (Aspect Ratio: " + ratio + ")");
                 } else {
                     Log.w(TAG, "ResolutionInfo is null");
                 }
@@ -222,18 +228,18 @@ public class MainActivity extends AppCompatActivity {
 
     private void logFrame(String tag, Size requested, ImageProxy img) {
         long ts = img.getImageInfo().getTimestamp();
-        String msg = "req=" + requested.getWidth() + "×" + requested.getHeight() +
-                ", act=" + img.getWidth() + "×" + img.getHeight() +
-                ", ts=" + ts;
+        String msg = "req=" + requested.getWidth() + "×" + requested.getHeight()
+                + ", act=" + img.getWidth() + "×" + img.getHeight()
+                + ", ts=" + ts;
         handler.postDelayed(() -> {
             Log.d(tag, msg);
             img.close();
         }, 10000);
     }
 
-    private String getAspectRatio(int width, int height) {
-        int divisor = gcd(width, height);
-        return (width / divisor) + ":" + (height / divisor);
+    private String getAspectRatio(int w, int h) {
+        int gcd = gcd(w, h);
+        return (w / gcd) + ":" + (h / gcd);
     }
 
     private int gcd(int a, int b) {
